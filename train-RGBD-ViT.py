@@ -11,6 +11,29 @@ import matplotlib.pyplot as plt
 from dataset import RGBDGraspDataset
 from utils import get_device
 
+
+datasets = [
+    {
+        'image_path': '../data/DeepGrasping_JustImages',
+        'depth_path': '../data/DEPTH_DeepGrasping_JustImages',
+        'anno_path': '../data/DeepGrasping_Anno',
+        'image_subdirs': [f'{i:02}' for i in range(1, 11)],
+    },
+    {
+        'image_path': '../data/Imagenet',
+        'depth_path': '../data/DEPTH_Imagenet',
+        'anno_path': '../data/Anno_ImageNet.json',
+    },
+    {
+        'image_path': '../data/HandCam',
+        'depth_path': '../data/DEPTH_HandCam',
+        'anno_path': '../data/Anno_HandCam4.json',
+    }
+]
+
+train_dataset = RGBDGraspDataset(datasets[:2])
+test_dataset = RGBDGraspDataset([datasets[2]])
+
 class ViTRGBD(nn.Module):
     def __init__(self, num_classes=5):
         super(ViTRGBD, self).__init__()
@@ -35,7 +58,7 @@ class ViTRGBD(nn.Module):
 
 def plot_confusion_matrix(cm, classes, save_path='confusion_matrix.png'):
     plt.figure(figsize=(10, 8))
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=classes, yticklabels=classes)
+    sns.heatmap(cm, annot=True, fmt='d', xticklabels=classes, yticklabels=classes)
     plt.title('Confusion Matrix')
     plt.ylabel('True Label')
     plt.xlabel('Predicted Label')
@@ -78,7 +101,6 @@ if __name__ == '__main__':
     num_epochs = 10
     batch_size = 32
     num_classes = 5
-    train_split = 0.8  # 80% training, 20% testing
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Dataset configuration
@@ -107,11 +129,6 @@ if __name__ == '__main__':
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=0.05)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs)
 
-    # Prepare data with train/test split
-    full_dataset = RGBDGraspDataset(datasets)
-    train_size = int(train_split * len(full_dataset))
-    test_size = len(full_dataset) - train_size
-    train_dataset, test_dataset = random_split(full_dataset, [train_size, test_size])
     
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
@@ -185,7 +202,7 @@ if __name__ == '__main__':
     
     # Generate and plot confusion matrix for best test results
     cm = confusion_matrix(best_test_labels, best_test_predictions)
-    class_names = [f"Class {i}" for i in range(num_classes)]  # Replace with actual class names
+    class_names =  ["3 jaw chuck", "key", "pinch", "power", "tool"]  # Replace with actual class names
     plot_confusion_matrix(cm, class_names, 'test_confusion_matrix.png')
     
     # Plot training and testing metrics

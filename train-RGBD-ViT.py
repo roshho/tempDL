@@ -20,12 +20,18 @@ class RGBDGraspDataset(Dataset):
         self.grasp_mapping = {}  # Map grasp types to indices
         self.idx_to_grasp = {}   # Reverse mapping
         
-        # Standard transforms for ViT
-        self.transform = transforms.Compose([
+        # Separate transforms for RGB and depth
+        self.rgb_transform = transforms.Compose([
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], 
                                std=[0.229, 0.224, 0.225])
+        ])
+        
+        self.depth_transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.5], std=[0.5])  # Standard normalization for depth
         ])
         
         self._load_all_datasets()
@@ -93,9 +99,20 @@ class RGBDGraspDataset(Dataset):
         
         # Load and transform RGB image
         rgb_image = Image.open(sample['rgb_path']).convert('RGB')
-        rgb_tensor = self.transform(rgb_image)
+        rgb_tensor = self.rgb_transform(rgb_image)
         
-        return rgb_tensor, sample['label']
+        # Load and transform depth image
+        if os.path.exists(sample['depth_path']):
+            depth_image = Image.open(sample['depth_path']).convert('L')  # Convert to grayscale
+            depth_tensor = self.depth_transform(depth_image)
+        else:
+            # If depth image is missing, create a zero tensor
+            depth_tensor = torch.zeros((1, 224, 224))
+        
+        # Concatenate RGB and depth tensors
+        rgbd_tensor = torch.cat([rgb_tensor, depth_tensor], dim=0)  # Now has 4 channels
+        
+        return rgbd_tensor, sample['label']
 
 # Define the model class
 class PretrainedViTClassifier(nn.Module):
@@ -103,8 +120,35 @@ class PretrainedViTClassifier(nn.Module):
         super().__init__()
         # Load pretrained ViT
         self.vit = models.vit_b_16(weights=models.ViT_B_16_Weights.IMAGENET1K_V1)
-        self.vit.heads.head = nn.Linear(self.vit.heads.head.in_features, num_classes)
         
+        # Get original projection layer's properties
+        original_conv_proj = self.vit.conv_proj
+        original_embed_dim = original_conv_proj.out_channels
+        
+        # Create new conv projection layer for 4 channels
+        new_conv_proj = nn.Conv2d(
+            in_channels=4,  # RGB + Depth
+            out_channels=original_embed_dim,
+            kernel_size=original_conv_proj.kernel_size,
+            stride=original_conv_proj.stride,
+            padding=original_conv_proj.padding
+        )
+        
+        # Initialize the new conv projection layer
+        with torch.no_grad():
+            # Copy weights for RGB channels
+            new_conv_proj.weight[:, :3] = original_conv_proj.weight.clone()
+            # Initialize depth channel with mean of RGB weights
+            new_conv_proj.weight[:, 3:] = original_conv_proj.weight.mean(dim=1, keepdim=True)
+            # Properly handle bias as Parameter
+            new_conv_proj.bias = nn.Parameter(original_conv_proj.bias.clone())
+        
+        # Replace the conv projection layer
+        self.vit.conv_proj = new_conv_proj
+        
+        # Modify classification head
+        self.vit.heads.head = nn.Linear(self.vit.heads.head.in_features, num_classes)
+    
     def forward(self, x):
         return self.vit(x)
 
@@ -118,9 +162,9 @@ def evaluate_model(model, data_loader, criterion, device, dataset):
     all_labels = []
 
     with torch.no_grad():
-        for rgb_maps, labels in data_loader:
-            rgb_maps, labels = rgb_maps.to(device), labels.to(device)
-            outputs = model(rgb_maps)
+        for rgbd_maps, labels in data_loader:
+            rgbd_maps, labels = rgbd_maps.to(device), labels.to(device)
+            outputs = model(rgbd_maps)
             loss = criterion(outputs, labels)
             running_loss += loss.item()
             _, preds = torch.max(outputs, 1)
@@ -168,11 +212,11 @@ def train_and_evaluate(train_dataset, test_dataset, num_epochs=10, batch_size=32
         correct = 0
         total = 0
 
-        for rgb_maps, labels in tqdm(train_loader, desc="Training"):
-            rgb_maps, labels = rgb_maps.to(device), labels.to(device)
+        for rgbd_maps, labels in tqdm(train_loader, desc="Training"):
+            rgbd_maps, labels = rgbd_maps.to(device), labels.to(device)
             
             optimizer.zero_grad()
-            outputs = model(rgb_maps)
+            outputs = model(rgbd_maps)
             loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()

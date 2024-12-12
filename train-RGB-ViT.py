@@ -15,10 +15,9 @@ class RGBGraspDataset(Dataset):
     def __init__(self, dataset_configs):
         self.configs = dataset_configs
         self.samples = []
-        self.grasp_mapping = {}  # Map grasp types to indices
-        self.idx_to_grasp = {}   # Reverse mapping
+        self.grasp_mapping = {}  
+        self.idx_to_grasp = {}   
         
-        # Standard transforms for ViT
         self.transform = transforms.Compose([
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
@@ -31,7 +30,6 @@ class RGBGraspDataset(Dataset):
     def _load_all_datasets(self):
         for config in self.configs:
             if 'image_subdirs' in config:
-                # Handle structured directory dataset
                 for subdir in config['image_subdirs']:
                     img_dir = os.path.join(config['image_path'], subdir)
                     anno_dir = config['anno_path']
@@ -58,7 +56,6 @@ class RGBGraspDataset(Dataset):
                                         'label': self.grasp_mapping[grasp_type]
                                     })
             else:
-                # Handle json annotation dataset
                 with open(config['anno_path'], 'r') as f:
                     annotations = json.load(f)
                 
@@ -123,7 +120,6 @@ def evaluate_model(model, data_loader, criterion, device, dataset):
     accuracy = 100 * correct / total
     avg_loss = running_loss / len(data_loader)
 
-    # Generate confusion matrix
     cm = confusion_matrix(all_labels, all_preds)
     plt.figure(figsize=(10, 8))
     sns.heatmap(cm, annot=True, fmt="d", cmap="Blues",
@@ -179,7 +175,7 @@ def train_and_evaluate(train_dataset, test_dataset, num_epochs=10, batch_size=32
         test_accuracy, test_loss = evaluate_model(model, test_loader, criterion, device, test_dataset)
         print(f"Test Loss: {test_loss:.4f}, Test Accuracy: {test_accuracy:.2f}%")
 
-        # Save the best model
+        # Save the best model - TBC
         if test_accuracy > best_accuracy:
             best_accuracy = test_accuracy
             torch.save(model.state_dict(), 'best_model.pth')
